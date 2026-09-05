@@ -1,0 +1,46 @@
+# Local engine: OrbStack (`docker context show` → orbstack), not Docker Desktop.
+# Postgres only: `docker compose up -d postgres` → host 127.0.0.1:5433
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "3"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      POSTGRES_DB: watermarkbot
+      POSTGRES_USER: watermark
+      POSTGRES_PASSWORD: watermark
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U watermark -d watermarkbot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  bot:
+    build: .
+    restart: unless-stopped
+    logging: *default-logging
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://watermark:watermark@postgres:5432/watermarkbot
+      DATA_DIR: /data
+    volumes:
+      - ./data:/data
+    ports:
+      - "${WEBHOOK_PORT:-8010}:8010"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:

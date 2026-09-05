@@ -1,0 +1,47 @@
+# Server deploy. Isolated project `waterbot`.
+# Do NOT publish Postgres or 8010 on the host: 5432=rekly, 5433=truegifts, 8010=rekly.
+name: waterbot
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "3"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: waterbot-postgres
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      POSTGRES_DB: watermarkbot
+      POSTGRES_USER: watermark
+      POSTGRES_PASSWORD: watermark
+    volumes:
+      - waterbot_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U watermark -d watermarkbot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  bot:
+    build: .
+    container_name: waterbot-bot
+    restart: unless-stopped
+    logging: *default-logging
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://watermark:watermark@postgres:5432/watermarkbot
+      DATA_DIR: /data
+      USE_WEBHOOK: "false"
+    volumes:
+      - ./data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  waterbot_pgdata:
