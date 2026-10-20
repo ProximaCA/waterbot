@@ -62,7 +62,7 @@ DATA_DIR: Path = Path(os.getenv("DATA_DIR", str(ROOT / "data"))).resolve()
 
 MAX_VIDEO_SECONDS: int = int(os.getenv("MAX_VIDEO_SECONDS", "180"))
 MAX_TAIL_SECONDS: int = int(os.getenv("MAX_TAIL_SECONDS", "15"))
-FFMPEG_CONCURRENCY: int = int(os.getenv("FFMPEG_CONCURRENCY", "1"))
+FFMPEG_CONCURRENCY: int = int(os.getenv("FFMPEG_CONCURRENCY", "2"))
 
 if not TOKEN:
     print("WARNING: MAX_TOKEN is not set.")

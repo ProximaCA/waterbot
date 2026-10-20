@@ -9,10 +9,10 @@ from app.models import Template
 
 _COLS = (
     "id, user_id, name, file_path, position, width_pct, opacity, "
-    "rotation_deg, pad_x, pad_y, is_default, created_at"
+    "rotation_deg, pad_x, pad_y, is_default, created_at, slot"
 )
 _ALLOWED = frozenset(
-    {"name", "position", "width_pct", "opacity", "rotation_deg", "pad_x", "pad_y"}
+    {"name", "file_path", "position", "width_pct", "opacity", "rotation_deg", "pad_x", "pad_y"}
 )
 
 
@@ -50,24 +50,31 @@ async def get_default(pool: asyncpg.Pool, user_id: int) -> Optional[Template]:
 
 
 async def create(
-    pool: asyncpg.Pool, user_id: int, *, name: str, file_path: str
+    pool: asyncpg.Pool, user_id: int, *, name: str, file_path: str,
+    slot: Optional[int] = None,
 ) -> Template:
     async with pool.acquire() as conn:
         async with conn.transaction():
-            n = await conn.fetchval(
-                "SELECT COUNT(*) FROM templates WHERE user_id = $1", user_id
+            await conn.fetchval("SELECT id FROM users WHERE id = $1 FOR UPDATE", user_id)
+            rows = await conn.fetch(
+                "SELECT slot FROM templates WHERE user_id = $1", user_id
             )
-            make_default = int(n or 0) == 0
+            occupied = {r["slot"] for r in rows}
+            if slot is None:
+                slot = next((s for s in range(1, 4) if s not in occupied), None)
+            if slot not in (1, 2, 3) or slot in occupied:
+                raise ValueError("template slot unavailable")
             row = await conn.fetchrow(
                 f"""
-                INSERT INTO templates (user_id, name, file_path, is_default)
-                VALUES ($1, $2, $3, $4)
+                INSERT INTO templates (user_id, name, file_path, is_default, slot)
+                VALUES ($1, $2, $3, $4, $5)
                 RETURNING {_COLS}
                 """,
                 user_id,
                 name,
                 file_path,
-                make_default,
+                False,
+                slot,
             )
     return Template.from_row(row)
 

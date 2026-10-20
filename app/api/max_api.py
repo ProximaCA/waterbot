@@ -101,7 +101,7 @@ async def set_my_commands(commands: Optional[List[Dict[str, str]]] = None) -> bo
 
 async def _patch_me(body: dict) -> tuple[int, str]:
     return await _patch(
-        f"{API_URL}/me",
+        f"{API_URL}/me/commands",
         headers=_json_headers(),
         json_body=body,
         timeout=15,
@@ -240,9 +240,9 @@ async def get_upload_endpoint(file_type: str) -> dict:
 
 
 async def upload_memory_get_payload(
-    *, file_type: str, data: bytes, filename: str,
+    *, file_type: str, data: bytes, filename: str, endpoint: Optional[dict] = None,
 ) -> dict:
-    endpoint = await get_upload_endpoint(file_type)
+    endpoint = endpoint if endpoint is not None else await get_upload_endpoint(file_type)
     upload_url = endpoint["url"]
     content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
     form = aiohttp.FormData()

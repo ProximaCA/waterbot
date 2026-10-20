@@ -36,7 +36,9 @@ services:
     environment:
       DATABASE_URL: postgresql://watermark:watermark@postgres:5432/watermarkbot
       DATA_DIR: /data
-      USE_WEBHOOK: "false"
+      USE_WEBHOOK: "true"
+    ports:
+      - "127.0.0.1:8012:8010"
     volumes:
       - ./data:/data
     depends_on:

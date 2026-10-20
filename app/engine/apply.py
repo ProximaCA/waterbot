@@ -52,6 +52,7 @@ def apply_video(
             marked,
             overlay=template.overlay(),
             max_seconds=MAX_VIDEO_SECONDS,
+            normalize=bool(tail),
         )
         if not tail:
             marked.replace(dest)
@@ -60,9 +61,9 @@ def apply_video(
         if duration_seconds(tail_path) > MAX_TAIL_SECONDS:
             raise VideoRejected(f"хвост длиннее {MAX_TAIL_SECONDS} с")
         if tail.placement == "start":
-            concat_sync(tail_path, marked, dest)
+            concat_sync(tail_path, marked, dest, normalized=marked)
         else:
-            concat_sync(marked, tail_path, dest)
+            concat_sync(marked, tail_path, dest, normalized=marked)
         return dest
     finally:
         if marked.exists() and marked.resolve() != dest.resolve():

@@ -12,6 +12,10 @@ from app.config import FFMPEG_CONCURRENCY, MAX_VIDEO_SECONDS
 from app.models import Overlay
 
 _sem = asyncio.Semaphore(max(1, FFMPEG_CONCURRENCY))
+_NORMALIZE_FILTER = (
+    "scale=1280:720:force_original_aspect_ratio=decrease,"
+    "pad=1280:720:(ow-iw)/2:(oh-ih)/2"
+)
 
 
 class VideoError(RuntimeError):
@@ -103,6 +107,7 @@ def watermark_video_sync(
     *,
     overlay: Overlay,
     max_seconds: int = MAX_VIDEO_SECONDS,
+    normalize: bool = False,
 ) -> Path:
     dur = duration_seconds(video)
     if dur > max_seconds:
@@ -111,22 +116,27 @@ def watermark_video_sync(
     with tempfile.TemporaryDirectory() as td:
         png = Path(td) / "wm.png"
         _overlay_png(video, mark, png, overlay)
+        args = [
+            "-i",
+            str(video),
+            "-i",
+            str(png),
+            "-filter_complex",
+            "overlay=0:0" + ("," + _NORMALIZE_FILTER if normalize else ""),
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "23",
+            "-c:a",
+            "aac",
+        ]
+        if normalize:
+            args.extend(["-ar", "44100", "-ac", "2", "-r", "30"])
         _run_ffmpeg(
             [
-                "-i",
-                str(video),
-                "-i",
-                str(png),
-                "-filter_complex",
-                "overlay=0:0",
-                "-c:v",
-                "libx264",
-                "-preset",
-                "veryfast",
-                "-crf",
-                "23",
-                "-c:a",
-                "aac",
+                *args,
                 "-movflags",
                 "+faststart",
                 str(dest),
@@ -135,12 +145,15 @@ def watermark_video_sync(
     return dest
 
 
-def concat_sync(first: Path, second: Path, dest: Path) -> Path:
+def concat_sync(first: Path, second: Path, dest: Path, *, normalized: Path | None = None) -> Path:
     dest.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as td:
         a = Path(td) / "a.mp4"
         b = Path(td) / "b.mp4"
         for src, out in ((first, a), (second, b)):
+            if src == normalized:
+                out.symlink_to(src.resolve())
+                continue
             _run_ffmpeg(
                 [
                     "-i",
@@ -160,8 +173,7 @@ def concat_sync(first: Path, second: Path, dest: Path) -> Path:
                     "-r",
                     "30",
                     "-vf",
-                    "scale=1280:720:force_original_aspect_ratio=decrease,"
-                    "pad=1280:720:(ow-iw)/2:(oh-ih)/2",
+                    _NORMALIZE_FILTER,
                     str(out),
                 ]
             )

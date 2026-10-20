@@ -6,7 +6,7 @@ import random
 from pathlib import Path
 from typing import Sequence
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from app.models import Overlay
 
@@ -64,10 +64,11 @@ def _load(src: Path | bytes | Image.Image) -> Image.Image:
     return Image.open(src).convert("RGBA")
 
 
-def _scale_mark(mark: Image.Image, base_w: int, width_pct: int) -> Image.Image:
-    target_w = max(1, int(base_w * max(1, min(width_pct, 100)) / 100))
-    ratio = target_w / max(1, mark.width)
-    target_h = max(1, int(mark.height * ratio))
+def _scale_mark(mark: Image.Image, base: tuple[int, int], width_pct: int) -> Image.Image:
+    ratio = min(base[0] / mark.width, base[1] / mark.height)
+    ratio *= max(1, min(width_pct, 100)) / 100
+    target_w = max(1, round(mark.width * ratio))
+    target_h = max(1, round(mark.height * ratio))
     return mark.resize((target_w, target_h), Image.Resampling.LANCZOS)
 
 
@@ -132,12 +133,12 @@ def render_overlay(
     mark = _load(mark_src)
     if overlay.position == "fill":
         mark = mark.resize(out.size, Image.Resampling.LANCZOS)
-    else:
-        mark = _scale_mark(mark, out.width, overlay.width_pct)
     if overlay.rotation_deg:
         mark = mark.rotate(
             overlay.rotation_deg, expand=True, resample=Image.Resampling.BICUBIC
         )
+    if overlay.position != "fill":
+        mark = _scale_mark(mark, out.size, overlay.width_pct)
     mark = _apply_opacity(mark, overlay.opacity)
     if overlay.position == "fill":
         out.alpha_composite(mark, (0, 0))
@@ -171,26 +172,61 @@ def jpeg_bytes(img: Image.Image, quality: int = 90) -> bytes:
     return buf.getvalue()
 
 
-def contact_sheet(mark_paths: Sequence[Path], *, cell: int = 220, cols: int = 3) -> Image.Image:
-    """Dark grid of watermark previews for the templates list."""
+_CHART = 400
+_PAD_PX = 6  # 20% pad → 120px from center
+
+
+def pad_chart(mark_src: Path | bytes | Image.Image, pad_x: int, pad_y: int) -> Image.Image:
+    """Square XY graph: origin at center, +X right, +Y down, mini-template at pad."""
+    size = _CHART
+    cx = cy = size // 2
+    canvas = Image.new("RGB", (size, size), (236, 240, 244))
+    draw = ImageDraw.Draw(canvas)
+    axis = (40, 48, 56)
+    draw.line((0, cy, size - 1, cy), fill=axis, width=2)
+    draw.line((cx, 0, cx, size - 1), fill=axis, width=2)
+    for tick in (-20, -10, 10, 20):
+        d = tick * _PAD_PX
+        draw.line((cx + d, cy - 6, cx + d, cy + 6), fill=axis, width=2)
+        draw.line((cx - 6, cy + d, cx + 6, cy + d), fill=axis, width=2)
+    draw.text((size - 22, cy + 8), "X", fill=axis, font_size=18)
+    draw.text((cx + 8, size - 28), "Y", fill=axis, font_size=18)
+    mark = _load(mark_src)
+    mark.thumbnail((72, 72), Image.Resampling.LANCZOS)
+    x = cx + pad_x * _PAD_PX - mark.width // 2
+    y = cy + pad_y * _PAD_PX - mark.height // 2
+    canvas.paste(mark, (x, y), mark)
+    return canvas
+
+
+def contact_sheet(
+    mark_paths: Sequence[Path | None], *, cell: int = 220, cols: int = 3,
+    selected_index: int | None = None,
+) -> Image.Image:
+    """White template slots, with a green outline around the active watermark."""
     paths = list(mark_paths)
-    if not paths:
-        img = Image.new("RGB", (cell, cell), (24, 24, 28))
-        return img
-    n = len(paths)
-    cols = max(1, min(cols, n))
+    n = max(cols, len(paths))
     rows = (n + cols - 1) // cols
-    canvas = Image.new("RGB", (cols * cell, rows * cell), (24, 24, 28))
-    for i, p in enumerate(paths):
-        try:
-            im = _load(p)
-        except Exception:
-            continue
-        im.thumbnail((cell - 16, cell - 16), Image.Resampling.LANCZOS)
-        bg = Image.new("RGBA", (cell, cell), (24, 24, 28, 255))
-        x = (cell - im.width) // 2
-        y = (cell - im.height) // 2
-        bg.alpha_composite(im, (x, y))
+    canvas = Image.new("RGB", (cols * cell, rows * (cell + 28)), "white")
+    draw = ImageDraw.Draw(canvas)
+    for i in range(n):
         rr, cc = i // cols, i % cols
-        canvas.paste(bg.convert("RGB"), (cc * cell, rr * cell))
+        left, top = cc * cell, rr * (cell + 28)
+        p = paths[i] if i < len(paths) else None
+        if p is not None:
+            try:
+                im = _load(p)
+            except Exception:
+                im = None
+            if im is not None:
+                im.thumbnail((cell - 24, cell - 24), Image.Resampling.LANCZOS)
+                canvas.paste(im, (left + (cell - im.width) // 2,
+                                  top + (cell - im.height) // 2), im)
+        draw.rectangle(
+            (left + 3, top + 3, left + cell - 4, top + cell - 4),
+            outline=(34, 177, 76) if i == selected_index else (230, 230, 230),
+            width=4 if i == selected_index else 1,
+        )
+        draw.text((left + cell // 2, top + cell + 3), str(i + 1),
+                  fill="black", anchor="mt", font_size=18)
     return canvas

@@ -42,6 +42,7 @@ def test_routes_cover_parsed_keys():
         rotation_kb,
         tail_card_kb,
         tails_list_kb,
+        tabs_kb,
         template_card_kb,
         templates_list_kb,
         width_kb,
@@ -52,10 +53,11 @@ def test_routes_cover_parsed_keys():
     tail = Tail(id=1, user_id=1, name="t", file_path="v.mp4")
     ch = Channel(id=2, user_id=1, chat_id=99, title="c")
     kbs = [
+        tabs_kb(""),
         templates_list_kb([tpl]),
         template_card_kb(tpl),
         confirm_delete_tpl_kb(4),
-        position_kb(4),
+        position_kb(4, tpl.position),
         width_kb(4),
         opacity_kb(4),
         rotation_kb(4),

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncpg
 
+from app import state
 from app.api import max_api
 from app.config import MAX_TAIL_SECONDS
 from app.database.repos import channels as ch_repo
@@ -11,7 +12,7 @@ from app.database.repos import users as user_repo
 from app.engine.apply import store_upload
 from app.engine.image import sniff_image
 from app.engine.video import VideoError, duration_seconds
-from app.handlers import pipeline
+from app.handlers import background, pipeline, rounding
 from app.handlers.channel import handle_channel_post
 from app.keyboards.builders import no_template_kb
 from app.models import User
@@ -53,13 +54,18 @@ async def handle_message_created(pool: asyncpg.Pool, update: dict) -> None:
 
     if text.startswith("/start"):
         clear_wait(int(sender_id))
-        await views.show_templates(pool, user, Screen.for_user(user))
+        background.reset_download(user)
+        rounding.reset_download(user)
+        await views.show_menu(pool, user, Screen.for_user(user))
         return
 
     ingest = {
         WAIT_WM_IMAGE: _ingest_template,
         WAIT_TAIL_VIDEO: _ingest_tail,
         WAIT_CHANNEL_FORWARD: _ingest_channel,
+        rounding.WAIT_ROUND_SIZE: rounding.ingest_size,
+        rounding.WAIT_ROUND_IMAGE: rounding.ingest_images,
+        background.WAIT_BG_IMAGE: background.ingest_images,
     }.get(wait)
     if ingest:
         await ingest(pool, user, update)
@@ -73,7 +79,7 @@ async def handle_message_created(pool: asyncpg.Pool, update: dict) -> None:
         await max_api.send_to_user(user.max_user_id, "этот тип не поддерживается")
         return
     if text:
-        await views.show_templates(pool, user, Screen.for_user(user))
+        await views.show_menu(pool, user, Screen.for_user(user))
 
 
 def _first_media(update: dict, kind: str) -> dict | None:
@@ -99,12 +105,26 @@ async def _ingest_template(pool, user: User, update: dict) -> None:
             user.max_user_id, "Нужна картинка. Пришлите файл или фото."
         )
         return
+    templates = await tpl_repo.list_for(pool, user.id)
+    slot, prompt_mid = state.TEMPLATE_UPLOAD.get(user.max_user_id, (None, None))
+    if slot is None:
+        occupied = {t.slot for t in templates}
+        slot = next((s for s in range(1, 4) if s not in occupied), None)
+    ui = Screen.for_user(user, replace_mid=prompt_mid)
+    if slot is None or any(t.slot == slot for t in templates):
+        state.TEMPLATE_UPLOAD.pop(user.max_user_id, None)
+        clear_wait(user.max_user_id)
+        await views.show_templates(pool, user, ui)
+        return
     path = store_upload(user.id, blob, suffix)
-    n = len(await tpl_repo.list_for(pool, user.id))
-    name = payload_stem(payload) or f"Шаблон {n + 1}"
-    t = await tpl_repo.create(pool, user.id, name=name, file_path=str(path))
+    name = payload_stem(payload) or f"Шаблон {slot}"
+    try:
+        await tpl_repo.create(pool, user.id, name=name, file_path=str(path), slot=slot)
+    except ValueError:
+        path.unlink(missing_ok=True)
+    state.TEMPLATE_UPLOAD.pop(user.max_user_id, None)
     clear_wait(user.max_user_id)
-    await views.show_template_card(pool, user, t, Screen.for_user(user))
+    await views.show_templates(pool, user, ui)
 
 
 async def _ingest_tail(pool, user: User, update: dict) -> None:
@@ -135,6 +155,7 @@ async def _ingest_tail(pool, user: User, update: dict) -> None:
     t = await tails_repo.create(pool, user.id, name=f"Хвост {n + 1}", file_path=str(path))
     clear_wait(user.max_user_id)
     await views.show_tail_card(pool, user, t, Screen.for_user(user))
+    state.TEMPLATE_RETURN[user.max_user_id] = ("tail:open", [str(t.id)])
 
 
 async def _ingest_channel(pool, user: User, update: dict) -> None:
@@ -152,13 +173,13 @@ async def _ingest_channel(pool, user: User, update: dict) -> None:
         return
     clear_wait(user.max_user_id)
     await views.show_channel_card(pool, user, c, Screen.for_user(user))
+    state.TEMPLATE_RETURN[user.max_user_id] = ("ch:open", [str(c.id)])
 
 
 async def _need_template(user: User) -> None:
-    await max_api.send_to_user(
-        user.max_user_id,
+    await Screen.for_user(user).show(
         "Сначала добавьте водяной знак.",
-        keyboard=no_template_kb(),
+        no_template_kb(),
     )
 
 
@@ -171,21 +192,29 @@ async def _apply_items(
         return
     kinds = {k for k, _ in items}
     if kinds == {"video"}:
-        progress = "Обрабатываю видео…"
+        progress = "🔄 **Обрабатываем видео..**"
     else:
-        progress = "Обрабатываю…"
-    await max_api.send_to_user(user.max_user_id, progress)
-    for kind, payload in items:
-        if kind == "photo":
-            blob = await pipeline.fetch_image(payload)
-            miss, tail = "Не скачал фото.", None
+        progress = views.PROCESSING_IMAGE
+    progress_mid = await Screen.for_user(user).show(progress, [])
+    try:
+        for kind, payload in items:
+            if kind == "photo":
+                blob = await pipeline.fetch_image(payload)
+                miss, tail = "Не скачал фото.", None
+            else:
+                blob = await max_api.download_payload(payload)
+                miss = "Не скачал видео."
+                tail = await pipeline.resolve_tail(pool, user.id)
+            if not blob:
+                await max_api.send_to_user(user.max_user_id, miss)
+                continue
+            await pipeline.process_media(
+                pool, user, blob, kind=kind, template=tpl, tail=tail
+            )
+    finally:
+        current_mid = state.UI_MID.get(user.max_user_id)
+        if not current_mid or not progress_mid or current_mid == progress_mid:
+            await views.show_menu(pool, user, Screen.for_user(user, progress_mid))
         else:
-            blob = await max_api.download_payload(payload)
-            miss = "Не скачал видео."
-            tail = await pipeline.resolve_tail(pool, user.id)
-        if not blob:
-            await max_api.send_to_user(user.max_user_id, miss)
-            continue
-        await pipeline.process_media(
-            pool, user, blob, kind=kind, template=tpl, tail=tail
-        )
+            # The user opened another screen while processing; keep their navigation.
+            await max_api.delete_message(progress_mid)

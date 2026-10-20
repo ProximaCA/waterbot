@@ -87,3 +87,15 @@ async def run_migrations(pool: asyncpg.Pool) -> None:
             "ALTER TABLE channels ADD COLUMN IF NOT EXISTS use_tail "
             "BOOLEAN NOT NULL DEFAULT FALSE"
         )
+        await conn.execute("""
+            ALTER TABLE templates ADD COLUMN IF NOT EXISTS slot INT;
+            WITH numbered AS (
+                SELECT id, row_number() OVER (PARTITION BY user_id ORDER BY id) AS slot
+                FROM templates
+            )
+            UPDATE templates t SET slot = numbered.slot
+            FROM numbered WHERE t.id = numbered.id AND t.slot IS NULL;
+            ALTER TABLE templates ALTER COLUMN slot SET NOT NULL;
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_templates_user_slot
+                ON templates (user_id, slot);
+        """)

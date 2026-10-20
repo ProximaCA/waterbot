@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncpg
 
 from app.database.repos import users as user_repo
+from app.handlers import background, rounding
 from app.renderers import views
 from app.renderers.views import Screen
 from app.schemas.updates import parse_bot_started
@@ -15,4 +16,6 @@ async def handle_bot_started(pool: asyncpg.Pool, update: dict) -> None:
         return
     user = await user_repo.upsert_user(pool, int(user_id), "")
     clear_wait(int(user_id))
-    await views.show_templates(pool, user, Screen.for_user(user))
+    background.reset_download(user)
+    rounding.reset_download(user)
+    await views.show_menu(pool, user, Screen.for_user(user))

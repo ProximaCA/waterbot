@@ -46,6 +46,7 @@ class Template:
     pad_x: int = 0
     pad_y: int = 0
     is_default: bool = False
+    slot: int = 1
 
     @classmethod
     def from_row(cls, row: Mapping[str, Any]) -> Template:
@@ -61,6 +62,7 @@ class Template:
             pad_x=int(row["pad_x"]),
             pad_y=int(row["pad_y"]),
             is_default=bool(row["is_default"]),
+            slot=int(row["slot"]),
         )
 
     def overlay(self) -> Overlay:

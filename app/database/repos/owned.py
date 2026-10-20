@@ -1,4 +1,4 @@
-"""Default-flag + delete-and-promote for templates/tails."""
+"""Default flags and owned deletion; only tails promote a replacement automatically."""
 from __future__ import annotations
 
 from typing import Literal, Optional
@@ -43,7 +43,7 @@ async def delete_owned(
     )
     if not row:
         return None
-    if row["is_default"]:
+    if table == "tails" and row["is_default"]:
         nxt = await conn.fetchval(
             f"SELECT id FROM {table} WHERE user_id = $1 ORDER BY id LIMIT 1",
             user_id,

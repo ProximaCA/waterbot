@@ -1,5 +1,7 @@
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
 from app.handlers.bot_started import handle_bot_started
 from app.handlers import message_created as mc
 from app.handlers.message_callback import handle_message_callback
@@ -8,6 +10,14 @@ from app.renderers.views import Screen
 from app.wait import WAIT_WM_IMAGE, clear_wait, get_wait, set_wait
 
 _USER = User(id=1, max_user_id=7, name="n")
+
+
+@pytest.fixture(autouse=True)
+def ui_api():
+    send = AsyncMock(side_effect=lambda **kw: {"message": {"body": {"mid": f"ui-{send.await_count}"}}})
+    delete = AsyncMock(return_value=True)
+    with patch.object(mc.views, "send_message", send), patch.object(mc.views, "delete_message", delete):
+        yield send, delete
 
 
 def _upd(*, text="", atts=None, chat_type="dialog"):
@@ -21,14 +31,14 @@ def _upd(*, text="", atts=None, chat_type="dialog"):
     }
 
 
-async def test_bot_started_opens_templates_and_clears_wait():
+async def test_bot_started_opens_menu_and_clears_wait():
     set_wait(9, WAIT_WM_IMAGE)
     with (
         patch(
             "app.handlers.bot_started.user_repo.upsert_user",
             AsyncMock(return_value=User(id=1, max_user_id=9, name="")),
         ),
-        patch("app.handlers.bot_started.views.show_templates", AsyncMock()) as show,
+        patch("app.handlers.bot_started.views.show_menu", AsyncMock()) as show,
     ):
         await handle_bot_started(object(), {"user": {"user_id": 9}})
     show.assert_awaited()
@@ -95,7 +105,7 @@ async def test_start_clears_wait_before_ingest():
     set_wait(7, WAIT_WM_IMAGE)
     with (
         patch.object(mc.user_repo, "upsert_user", AsyncMock(return_value=_USER)),
-        patch.object(mc.views, "show_templates", AsyncMock()) as show,
+        patch.object(mc.views, "show_menu", AsyncMock()) as show,
         patch.object(mc, "_ingest_template", AsyncMock()) as ingest,
     ):
         await mc.handle_message_created(object(), _upd(text="/start"))
@@ -177,7 +187,7 @@ async def test_png_file_goes_to_photo():
     assert apply.await_args.args[2][0][0] == "photo"
 
 
-async def test_dm_photo_without_template():
+async def test_dm_photo_without_template(ui_api):
     send = AsyncMock()
     with (
         patch.object(mc.user_repo, "upsert_user", AsyncMock(return_value=_USER)),
@@ -188,7 +198,7 @@ async def test_dm_photo_without_template():
             object(),
             _upd(atts=[{"type": "image", "payload": {"token": "t"}}]),
         )
-    assert send.await_args.args[1] == "Сначала добавьте водяной знак."
+    assert ui_api[0].await_args.kwargs["text"] == "Сначала добавьте водяной знак."
 
 
 async def test_mp4_file_goes_to_video():
@@ -233,7 +243,7 @@ async def test_dm_album_applies_each_photo():
     assert [p["token"] for _, p in items] == ["a", "b"]
 
 
-async def test_dm_album_one_progress_then_each_item():
+async def test_dm_album_one_progress_then_each_item(ui_api):
     send = AsyncMock()
     process = AsyncMock(return_value={"ok": True})
     fetch = AsyncMock(return_value=b"\xff\xd8\xffxx")
@@ -254,14 +264,16 @@ async def test_dm_album_one_progress_then_each_item():
                 ]
             ),
         )
-    assert send.await_count == 1
-    assert send.await_args.args[1] == "Обрабатываю…"
+    assert [c.kwargs["text"] for c in ui_api[0].await_args_list] == [
+        "🔄 **Обрабатываем изображение..**", "Главное меню"
+    ]
+    ui_api[1].assert_awaited_once_with("ui-1")
     assert fetch.await_count == 2
     assert process.await_count == 2
     assert [c.kwargs["kind"] for c in process.await_args_list] == ["photo", "photo"]
 
 
-async def test_dm_album_continues_on_download_miss():
+async def test_dm_album_continues_on_download_miss(ui_api):
     send = AsyncMock()
     process = AsyncMock(return_value={"ok": True})
     fetch = AsyncMock(side_effect=[None, b"\xff\xd8\xffxx"])
@@ -283,10 +295,11 @@ async def test_dm_album_continues_on_download_miss():
             ),
         )
     assert [c.args[1] for c in send.await_args_list] == [
-        "Обрабатываю…",
         "Не скачал фото.",
     ]
     process.assert_awaited_once()
+    assert ui_api[0].await_args.kwargs["text"] == "Главное меню"
+    ui_api[1].assert_awaited_once_with("ui-1")
 
 
 async def test_wait_template_skips_video_file():
@@ -315,7 +328,7 @@ async def test_wait_template_skips_video_file():
     clear_wait(7)
 
 
-async def test_dm_video_progress_and_resolve_tail():
+async def test_dm_video_progress_and_resolve_tail(ui_api):
     send = AsyncMock()
     process = AsyncMock(return_value={"ok": True})
     download = AsyncMock(return_value=b"mp4bytes")
@@ -337,16 +350,17 @@ async def test_dm_video_progress_and_resolve_tail():
             object(),
             _upd(atts=[{"type": "video", "payload": {"token": "vid"}}]),
         )
-    assert send.await_args.args[1] == "Обрабатываю видео…"
+    assert ui_api[0].await_args_list[0].kwargs["text"] == "🔄 **Обрабатываем видео..**"
+    assert ui_api[0].await_args.kwargs["text"] == "Главное меню"
     fetch.assert_not_awaited()
     download.assert_awaited_once()
-    delete.assert_not_awaited()
+    ui_api[1].assert_awaited_once_with("ui-1")
     assert process.await_args.kwargs["kind"] == "video"
     assert process.await_args.kwargs["tail"] is tail
     assert process.await_args.kwargs.get("chat_id") is None
 
 
-async def test_dm_mixed_tail_only_on_video():
+async def test_dm_mixed_tail_only_on_video(ui_api):
     send = AsyncMock()
     process = AsyncMock(return_value={"ok": True})
     download = AsyncMock(return_value=b"mp4bytes")
@@ -373,17 +387,18 @@ async def test_dm_mixed_tail_only_on_video():
                 ]
             ),
         )
-    assert send.await_args.args[1] == "Обрабатываю…"
+    assert ui_api[0].await_args_list[0].kwargs["text"] == "🔄 **Обрабатываем изображение..**"
+    assert ui_api[0].await_args.kwargs["text"] == "Главное меню"
     fetch.assert_awaited_once()
     download.assert_awaited_once()
     resolve_tail.assert_awaited_once()
-    delete.assert_not_awaited()
+    ui_api[1].assert_awaited_once_with("ui-1")
     assert [c.kwargs["kind"] for c in process.await_args_list] == ["photo", "video"]
     assert process.await_args_list[0].kwargs["tail"] is None
     assert process.await_args_list[1].kwargs["tail"] is None
 
 
-async def test_dm_video_continues_on_download_miss():
+async def test_dm_video_continues_on_download_miss(ui_api):
     send = AsyncMock()
     process = AsyncMock(return_value={"ok": True})
     download = AsyncMock(side_effect=[None, b"mp4bytes"])
@@ -406,7 +421,8 @@ async def test_dm_video_continues_on_download_miss():
             ),
         )
     assert [c.args[1] for c in send.await_args_list] == [
-        "Обрабатываю видео…",
         "Не скачал видео.",
     ]
     process.assert_awaited_once()
+    assert ui_api[0].await_args.kwargs["text"] == "Главное меню"
+    ui_api[1].assert_awaited_once_with("ui-1")

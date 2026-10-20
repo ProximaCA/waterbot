@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+import asyncio
+import io
+from dataclasses import replace
 from pathlib import Path
 from typing import Awaitable, Callable, Optional, Sequence
 
 import asyncpg
+from PIL import Image, ImageOps, UnidentifiedImageError
 
+from app import state
+from app.engine.background import remove_background
+from app.engine.rounding import MAX_SIZE, round_image
+from app.handlers import background, rounding
 from app.api.max_api import answer_callback
 from app.database.repos import channels as ch_repo
 from app.database.repos import tails as tails_repo
@@ -56,14 +64,14 @@ def _tab(show) -> Handler:
     return h
 
 
-def _open(get, card, listing) -> Handler:
+def _open(repo, card, listing, *extra) -> Handler:
     async def h(pool, user, ui, args):
         tid = _tid(args)
-        item = await get(pool, tid, user.id) if tid else None
+        item = await repo.get(pool, tid, user.id) if tid else None
         if not item:
             await listing(pool, user, ui)
             return
-        await card(pool, user, item, ui)
+        await card(pool, user, item, ui, *extra)
 
     return h
 
@@ -111,7 +119,7 @@ def _ask(kind, show) -> Handler:
     return h
 
 
-def _set(save, card, listing, conv=str) -> Handler:
+def _set(save, card, listing, conv=str, extra=()) -> Handler:
     async def h(pool, user, ui, args):
         tid = _tid(args)
         if tid is None or len(args) < 2:
@@ -124,7 +132,7 @@ def _set(save, card, listing, conv=str) -> Handler:
             return
         item = await save(pool, tid, user.id, val)
         if item:
-            await card(pool, user, item, ui)
+            await card(pool, user, item, ui, *extra)
         else:
             await listing(pool, user, ui)
 
@@ -153,11 +161,11 @@ def _as_position(s: str) -> str:
     return s
 
 
-def _tpl_field(field, conv) -> Handler:
+def _tpl_field(field, conv, card=views.show_template_card, extra=()) -> Handler:
     async def save(pool, tid, user_id, val):
         return await tpl_repo.update(pool, tid, user_id, **{field: val})
 
-    return _set(save, views.show_template_card, views.show_templates, conv)
+    return _set(save, card, views.show_templates, conv, extra)
 
 
 async def _save_ch_tpl(pool, cid, user_id, raw):
@@ -178,13 +186,102 @@ async def _tail_off(pool, user, ui, args):
     await views.show_tails(pool, user, ui)
 
 
+async def _save_position(pool, tid, user_id, position):
+    return await tpl_repo.update(pool, tid, user_id, position=position)
+
+
+async def _select_template(pool, user, ui, args):
+    clear_wait(user.max_user_id)
+    tid = _tid(args)
+    if tid:
+        await tpl_repo.set_default(pool, tid, user.id)
+    await views.show_templates(pool, user, ui)
+
+
+async def _new_template(pool, user, ui, args):
+    clear_wait(user.max_user_id)
+    state.TEMPLATE_UPLOAD.pop(user.max_user_id, None)
+    templates = await tpl_repo.list_for(pool, user.id)
+    occupied = {t.slot for t in templates}
+    slot = _tid(args) if args else next((s for s in range(1, 4) if s not in occupied), None)
+    if slot not in (1, 2, 3) or slot in occupied:
+        await views.show_templates(pool, user, ui)
+        return
+    set_wait(user.max_user_id, WAIT_WM_IMAGE)
+    mid = await views.ask_new_template(user, ui)
+    state.TEMPLATE_UPLOAD[user.max_user_id] = (slot, mid)
+
+
+async def _templates_back(pool, user, ui, args):
+    clear_wait(user.max_user_id)
+    key, back_args = state.TEMPLATE_RETURN.get(user.max_user_id, ("nav:home", []))
+    await ROUTES[key](pool, user, ui, back_args)
+
+
+async def _channels_menu(pool, user, ui, args):
+    clear_wait(user.max_user_id)
+    if args == ["bg"]:
+        state.CHANNEL_RETURN[user.max_user_id] = "bg:menu"
+    await views.show_channels(pool, user, ui)
+
+
+def _circle_mark(data: bytes) -> Image.Image:
+    with Image.open(io.BytesIO(data)) as image:
+        size = min(ImageOps.exif_transpose(image).size)
+    return round_image(data, max(1, min(size, MAX_SIZE)))
+
+
+async def _transform_template(pool, user, ui, args, transform) -> None:
+    tid = _tid(args)
+    item = await tpl_repo.get(pool, tid, user.id) if tid else None
+    if not item:
+        await views.show_templates(pool, user, ui)
+        return
+    await ui.show(views.PROCESSING_IMAGE, [])
+    ui = Screen.for_user(user)
+    src = Path(item.file_path)
+    dest = src.with_suffix(".png")
+    tmp = dest.with_name(dest.name + ".tmp")
+    try:
+        result = await asyncio.to_thread(transform, src.read_bytes())
+        await asyncio.to_thread(result.save, tmp, "PNG")
+        tmp.replace(dest)
+        if dest.resolve() != src.resolve():
+            src.unlink(missing_ok=True)
+            item = await tpl_repo.update(
+                pool, item.id, user.id, file_path=str(dest)
+            ) or replace(item, file_path=str(dest))
+    except (OSError, ValueError, UnidentifiedImageError, Image.DecompressionBombError):
+        tmp.unlink(missing_ok=True)
+    await views.show_template_card(pool, user, item, ui)
+
+
+async def _round_template(pool, user, ui, args) -> None:
+    await _transform_template(pool, user, ui, args, _circle_mark)
+
+
+async def _bg_template(pool, user, ui, args) -> None:
+    await _transform_template(pool, user, ui, args, remove_background)
+
+
 ROUTES: dict[str, Handler] = {
+    "nav:home": _tab(views.show_menu),
     "tab:tpl": _tab(views.show_templates),
     "tab:tails": _tab(views.show_tails),
-    "tab:ch": _tab(views.show_channels),
+    "tab:ch": _channels_menu,
     "tab:me": _tab(views.show_profile),
-    "tpl:new": _ask(WAIT_WM_IMAGE, views.ask_new_template),
-    "tpl:open": _open(tpl_repo.get, views.show_template_card, views.show_templates),
+    "round:menu": _tab(rounding.show),
+    "round:standard": rounding.standard,
+    "round:custom": rounding.custom,
+    "round:download": rounding.download,
+    "bg:noop": _tab(background.show),
+    "bg:menu": _tab(background.show),
+    "bg:upload": background.upload,
+    "bg:download": background.download,
+    "tpl:new": _new_template,
+    "tpl:back": _templates_back,
+    "tpl:select": _select_template,
+    "tpl:open": _open(tpl_repo, views.show_template_card, views.show_templates),
     "tpl:use": _use(
         tpl_repo.set_default,
         tpl_repo.get,
@@ -193,21 +290,25 @@ ROUTES: dict[str, Handler] = {
     ),
     "tpl:del": _picker(views.show_delete_tpl),
     "tpl:delok": _delok(tpl_repo.delete, views.show_templates),
-    "wm:pos": _picker(views.show_position_picker),
+    "tpl:round": _round_template,
+    "tpl:bg": _bg_template,
+    "wm:pos": _open(tpl_repo, views.show_position_picker, views.show_templates),
     "wm:w": _picker(views.show_width_picker),
     "wm:op": _picker(views.show_opacity_picker),
     "wm:rot": _picker(views.show_rotation_picker),
-    "wm:px": _picker(views.show_pad_picker, "x"),
-    "wm:py": _picker(views.show_pad_picker, "y"),
-    "wm:setpos": _tpl_field("position", _as_position),
+    "wm:px": _open(tpl_repo, views.show_pad_picker, views.show_templates, "x"),
+    "wm:py": _open(tpl_repo, views.show_pad_picker, views.show_templates, "y"),
+    "wm:setpos": _set(
+        _save_position, views.show_position_picker, views.show_templates, _as_position
+    ),
     "wm:setw": _tpl_field("width_pct", int),
     "wm:setop": _tpl_field("opacity", int),
     "wm:setrot": _tpl_field("rotation_deg", int),
-    "wm:setpx": _tpl_field("pad_x", int),
-    "wm:setpy": _tpl_field("pad_y", int),
+    "wm:setpx": _tpl_field("pad_x", int, views.show_pad_picker, ("x",)),
+    "wm:setpy": _tpl_field("pad_y", int, views.show_pad_picker, ("y",)),
     "tail:off": _tail_off,
     "tail:new": _ask(WAIT_TAIL_VIDEO, views.ask_new_tail),
-    "tail:open": _open(tails_repo.get, views.show_tail_card, views.show_tails),
+    "tail:open": _open(tails_repo, views.show_tail_card, views.show_tails),
     "tail:use": _use(
         tails_repo.set_default,
         tails_repo.get,
@@ -223,7 +324,7 @@ ROUTES: dict[str, Handler] = {
     "tail:del": _picker(views.show_delete_tail),
     "tail:delok": _delok(tails_repo.delete, views.show_tails),
     "ch:add": _ask(WAIT_CHANNEL_FORWARD, views.ask_bind_channel),
-    "ch:open": _open(ch_repo.get, views.show_channel_card, views.show_channels),
+    "ch:open": _open(ch_repo, views.show_channel_card, views.show_channels),
     "ch:toggle": _toggle(
         ch_repo.get, _flip_enabled, views.show_channel_card, views.show_channels
     ),
@@ -250,3 +351,18 @@ async def handle_message_callback(pool: asyncpg.Pool, update: dict) -> None:
     await answer_callback(callback_id, "")
     ui = Screen.for_user(user, replace_mid=extract_message_mid(update))
     await handler(pool, user, ui, args)
+    if key in {"nav:home", "tab:tails", "tab:ch", "tab:me"}:
+        state.TEMPLATE_RETURN[user.max_user_id] = (key, [])
+    elif key.startswith("round:"):
+        state.TEMPLATE_RETURN[user.max_user_id] = ("round:menu", [])
+    elif key.startswith("bg:"):
+        state.TEMPLATE_RETURN[user.max_user_id] = ("bg:menu", [])
+    elif key.startswith(("tail:", "ch:")):
+        if key in {"tail:off", "tail:delok", "ch:unbind"}:
+            destination = "tab:tails" if key.startswith("tail:") else "tab:ch"
+            state.TEMPLATE_RETURN[user.max_user_id] = (destination, [])
+        elif key in {"tail:new", "tail:del", "ch:add"}:
+            state.TEMPLATE_RETURN[user.max_user_id] = (key, list(args))
+        else:
+            destination = "tail:open" if key.startswith("tail:") else "ch:open"
+            state.TEMPLATE_RETURN[user.max_user_id] = (destination, list(args[:1]))
