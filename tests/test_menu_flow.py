@@ -103,20 +103,20 @@ async def test_real_menu_transitions_and_back(flow):
             await click("⚙️ Редактировать")
             await click("Ширина")
             assert store[state.UI_MID[user.max_user_id]]["text"] == "Ширина знака (% кадра)"
-            await click("⬅️ Назад")
-            await click("⬅️ Назад")
+            await click("← Назад")
+            await click("← Назад")
         elif section == "🌝 Округление":
             await click("Стандартный")
             assert get_wait(user.max_user_id) == rounding.WAIT_ROUND_IMAGE
-            await click("⬅️ Назад")
+            await click("← Назад")
         elif section == "◻️ Убрать фон":
             await click("➕ Загрузить")
-            await click("⬅️ Назад")
+            await click("← Назад")
             assert store[state.UI_MID[user.max_user_id]]["text"] == background.BODY
         elif section == "🤖 Авто замена в канале":
             await click("✅ channel")
-            await click("⬅️ Назад")
-        await click("⬅️ Назад")
+            await click("← Назад")
+        await click("← Назад")
         assert buttons() == tabs_kb("")
         assert get_wait(user.max_user_id) is None
         assert len(store) == 1
@@ -155,8 +155,8 @@ async def test_successful_input_replaces_its_prompt(flow, kind):
         await message(link={"type": "forward", "chat_id": 123})
     assert get_wait(user.max_user_id) is None
     assert len(store) == 1
-    await click("⬅️ Назад")
-    await click("⬅️ Назад")
+    await click("← Назад")
+    await click("← Назад")
     assert buttons() == tabs_kb("")
 
 
@@ -206,7 +206,7 @@ async def test_start_hides_downloads_until_new_successful_processing(flow, monke
         await message(attachments=[{"type": "image", "payload": {"token": "image"}}])
         assert download_button() is not None
         originals.append(handler._latest(user))
-        await click("⬅️ Назад")
+        await click("← Назад")
 
     if start == "command":
         await message("/start")
@@ -220,13 +220,13 @@ async def test_start_hides_downloads_until_new_successful_processing(flow, monke
         with monkeypatch.context() as failed:
             failed.setattr(max_api, "download_payload", AsyncMock(return_value=b"invalid image"))
             await message(attachments=[{"type": "image", "payload": {"token": "bad"}}])
-        await click("⬅️ Назад")
+        await click("← Назад")
         assert download_button() is None
         await click(upload)
         await message(attachments=[{"type": "image", "payload": {"token": "new"}}])
         assert download_button()["payload"].endswith(handler._latest(user).stem)
         await click("📥 Скачать изображение")
         assert any(a["type"] == "file" for data in store.values() for a in data.get("attachments", []))
-        await click("⬅️ Назад")
+        await click("← Назад")
 
     assert all(path.is_file() for path in originals)

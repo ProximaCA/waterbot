@@ -102,15 +102,6 @@ def _delok(delete, listing) -> Handler:
     return h
 
 
-def _picker(fn, *extra) -> Handler:
-    async def h(pool, user, ui, args):
-        tid = _tid(args)
-        if tid:
-            await fn(ui, tid, *extra)
-
-    return h
-
-
 def _ask(kind, show) -> Handler:
     async def h(pool, user, ui, args):
         set_wait(user.max_user_id, kind)
@@ -184,10 +175,6 @@ async def _flip_tail(pool, user, c):
 async def _tail_off(pool, user, ui, args):
     await tails_repo.set_tails_enabled(pool, user.id, False)
     await views.show_tails(pool, user, ui)
-
-
-async def _save_position(pool, tid, user_id, position):
-    return await tpl_repo.update(pool, tid, user_id, position=position)
 
 
 async def _select_template(pool, user, ui, args):
@@ -288,22 +275,20 @@ ROUTES: dict[str, Handler] = {
         views.show_template_card,
         views.show_templates,
     ),
-    "tpl:del": _picker(views.show_delete_tpl),
+    "tpl:del": _open(tpl_repo, views.show_delete_tpl, views.show_templates),
     "tpl:delok": _delok(tpl_repo.delete, views.show_templates),
     "tpl:round": _round_template,
     "tpl:bg": _bg_template,
     "wm:pos": _open(tpl_repo, views.show_position_picker, views.show_templates),
-    "wm:w": _picker(views.show_width_picker),
-    "wm:op": _picker(views.show_opacity_picker),
-    "wm:rot": _picker(views.show_rotation_picker),
+    "wm:w": _open(tpl_repo, views.show_width_picker, views.show_templates),
+    "wm:op": _open(tpl_repo, views.show_opacity_picker, views.show_templates),
+    "wm:rot": _open(tpl_repo, views.show_rotation_picker, views.show_templates),
     "wm:px": _open(tpl_repo, views.show_pad_picker, views.show_templates, "x"),
     "wm:py": _open(tpl_repo, views.show_pad_picker, views.show_templates, "y"),
-    "wm:setpos": _set(
-        _save_position, views.show_position_picker, views.show_templates, _as_position
-    ),
-    "wm:setw": _tpl_field("width_pct", int),
-    "wm:setop": _tpl_field("opacity", int),
-    "wm:setrot": _tpl_field("rotation_deg", int),
+    "wm:setpos": _tpl_field("position", _as_position, views.show_position_picker),
+    "wm:setw": _tpl_field("width_pct", int, views.show_width_picker),
+    "wm:setop": _tpl_field("opacity", int, views.show_opacity_picker),
+    "wm:setrot": _tpl_field("rotation_deg", int, views.show_rotation_picker),
     "wm:setpx": _tpl_field("pad_x", int, views.show_pad_picker, ("x",)),
     "wm:setpy": _tpl_field("pad_y", int, views.show_pad_picker, ("y",)),
     "tail:off": _tail_off,
@@ -321,7 +306,7 @@ ROUTES: dict[str, Handler] = {
         views.show_tails,
         str,
     ),
-    "tail:del": _picker(views.show_delete_tail),
+    "tail:del": _open(tails_repo, views.show_delete_tail, views.show_tails),
     "tail:delok": _delok(tails_repo.delete, views.show_tails),
     "ch:add": _ask(WAIT_CHANNEL_FORWARD, views.ask_bind_channel),
     "ch:open": _open(ch_repo, views.show_channel_card, views.show_channels),

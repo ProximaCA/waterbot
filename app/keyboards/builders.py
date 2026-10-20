@@ -5,6 +5,8 @@ from typing import Iterable, List, Sequence
 
 from app.models import Channel, Tail, Template
 
+BTN_BACK = "← Назад"
+
 
 def btn(text: str, payload: str) -> dict:
     return {"type": "callback", "text": text, "payload": payload}
@@ -76,22 +78,20 @@ def templates_list_kb(templates: Sequence[Template]) -> List[List[dict]]:
                 btn("⚙️ Редактировать", f"tpl:open:{t.id}"),
             ]
         )
-    kb.append([btn("⬅️ Назад", "tpl:back")])
+    kb.append([btn(BTN_BACK, "tpl:back")])
     return kb
 
 
 def template_card_kb(t: Template) -> List[List[dict]]:
     tid = t.id
-    use_label = "✅ В работе" if t.is_default else "Сделать основным"
-    kb: List[List[dict]] = [
+    return [
         [btn("Расположение", f"wm:pos:{tid}"), btn("Ширина", f"wm:w:{tid}")],
         [btn("Прозрачность", f"wm:op:{tid}"), btn("Поворот", f"wm:rot:{tid}")],
         [btn("Сдвиг по X", f"wm:px:{tid}"), btn("Сдвиг по Y", f"wm:py:{tid}")],
         [btn("Округлить", f"tpl:round:{tid}"), btn("Убрать фон", f"tpl:bg:{tid}")],
-        [btn(use_label, f"tpl:use:{tid}"), btn("Удалить", f"tpl:del:{tid}")],
-        [btn("⬅️ Назад", "tab:tpl")],
+        [btn("Удалить", f"tpl:del:{tid}")],
+        [btn(BTN_BACK, "tab:tpl")],
     ]
-    return kb
 
 
 def confirm_delete_tpl_kb(tid: int) -> List[List[dict]]:
@@ -109,7 +109,7 @@ def position_kb(tid: int, position: str) -> List[List[dict]]:
             btn("❎" if code == position else label, f"wm:setpos:{tid}:{code}")
             for label, code in chunk
         ])
-    rows.append([btn("⬅️ Назад", f"tpl:open:{tid}")])
+    rows.append([btn(BTN_BACK, f"tpl:open:{tid}")])
     return rows
 
 
@@ -124,21 +124,21 @@ def _chunk_btns(items: Iterable[tuple[str, str]], per_row: int) -> List[List[dic
 def width_kb(tid: int) -> List[List[dict]]:
     items = [(f"{n}%", f"wm:setw:{tid}:{n}") for n in WIDTHS]
     rows = _chunk_btns(items, 4)
-    rows.append([btn("⬅️ Назад", f"tpl:open:{tid}")])
+    rows.append([btn(BTN_BACK, f"tpl:open:{tid}")])
     return rows
 
 
 def opacity_kb(tid: int) -> List[List[dict]]:
     items = [(f"{n}%", f"wm:setop:{tid}:{n}") for n in OPACITIES]
     rows = _chunk_btns(items, 5)
-    rows.append([btn("⬅️ Назад", f"tpl:open:{tid}")])
+    rows.append([btn(BTN_BACK, f"tpl:open:{tid}")])
     return rows
 
 
 def rotation_kb(tid: int) -> List[List[dict]]:
     items = [(f"{n}°", f"wm:setrot:{tid}:{n}") for n in ROTATIONS]
     rows = _chunk_btns(items, 3)
-    rows.append([btn("⬅️ Назад", f"tpl:open:{tid}")])
+    rows.append([btn(BTN_BACK, f"tpl:open:{tid}")])
     return rows
 
 
@@ -146,12 +146,12 @@ def pad_kb(tid: int, axis: str) -> List[List[dict]]:
     verb = "setpx" if axis == "x" else "setpy"
     items = [(f"{n}%", f"wm:{verb}:{tid}:{n}") for n in PADS]
     rows = _chunk_btns(items, 5)
-    rows.append([btn("⬅️ Назад", f"tpl:open:{tid}")])
+    rows.append([btn(BTN_BACK, f"tpl:open:{tid}")])
     return rows
 
 
 def cancel_wait_kb() -> List[List[dict]]:
-    return [[btn("⬅️ Назад", "tab:tpl")]]
+    return [[btn(BTN_BACK, "tab:tpl")]]
 
 
 def tails_list_kb(tails: Sequence[Tail], enabled: bool) -> List[List[dict]]:
@@ -166,7 +166,7 @@ def tails_list_kb(tails: Sequence[Tail], enabled: bool) -> List[List[dict]]:
                 btn("✎", f"tail:open:{t.id}"),
             ]
         )
-    kb.append([btn("⬅️ Назад", "nav:home")])
+    kb.append([btn(BTN_BACK, "nav:home")])
     return kb
 
 
@@ -181,7 +181,7 @@ def tail_card_kb(t: Tail) -> List[List[dict]]:
             btn(f"{end_m}В конец", f"tail:place:{tid}:end"),
         ],
         [btn(use_label, f"tail:use:{tid}"), btn("Удалить", f"tail:del:{tid}")],
-        [btn("⬅️ Назад", "tab:tails")],
+        [btn(BTN_BACK, "tab:tails")],
     ]
     return kb
 
@@ -193,7 +193,7 @@ def confirm_delete_tail_kb(tid: int) -> List[List[dict]]:
 
 
 def cancel_tail_wait_kb() -> List[List[dict]]:
-    return [[btn("⬅️ Назад", "tab:tails")]]
+    return [[btn(BTN_BACK, "tab:tails")]]
 
 
 def channels_list_kb(channels: Sequence[Channel], *, back: str = "nav:home") -> List[List[dict]]:
@@ -202,7 +202,7 @@ def channels_list_kb(channels: Sequence[Channel], *, back: str = "nav:home") -> 
         mark = "✅ " if c.enabled else "⛔️ "
         title = (c.title or str(c.chat_id))[:28]
         kb.append([btn(f"{mark}{title}", f"ch:open:{c.id}")])
-    kb.append([btn("⬅️ Назад", back)])
+    kb.append([btn(BTN_BACK, back)])
     return kb
 
 
@@ -222,16 +222,16 @@ def channel_card_kb(c: Channel, templates: Sequence[Template]) -> List[List[dict
     if tpl_rows:
         kb.append(tpl_rows)
     kb.append([btn("Отвязать", f"ch:unbind:{cid}")])
-    kb.append([btn("⬅️ Назад", "tab:ch")])
+    kb.append([btn(BTN_BACK, "tab:ch")])
     return kb
 
 
 def cancel_channel_wait_kb() -> List[List[dict]]:
-    return [[btn("⬅️ Назад", "tab:ch")]]
+    return [[btn(BTN_BACK, "tab:ch")]]
 
 
 def profile_kb() -> List[List[dict]]:
-    return [[btn("⬅️ Назад", "nav:home")]]
+    return [[btn(BTN_BACK, "nav:home")]]
 
 
 def no_template_kb() -> List[List[dict]]:

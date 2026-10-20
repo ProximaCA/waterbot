@@ -172,6 +172,17 @@ def jpeg_bytes(img: Image.Image, quality: int = 90) -> bytes:
     return buf.getvalue()
 
 
+def checkerboard(size: int = 720, step: int = 28) -> Image.Image:
+    plate = Image.new("RGB", (size, size), "white")
+    draw = ImageDraw.Draw(plate)
+    gray = (100, 100, 100)
+    for y in range(0, size, step):
+        for x in range(0, size, step):
+            if ((x // step) + (y // step)) % 2 == 0:
+                draw.rectangle((x, y, x + step - 1, y + step - 1), fill=gray)
+    return plate
+
+
 _CHART = 400
 _PAD_PX = 6  # 20% pad → 120px from center
 

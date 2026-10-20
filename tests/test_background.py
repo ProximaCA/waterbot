@@ -53,7 +53,7 @@ async def test_menu_upload_download_and_next_photo_uses_active_template(monkeypa
         await click("bg:menu")
         assert screens[-1][0] == "◻️ **Убрать фон**\n\nЗагрузите изображение, мы удалим фон и сохраним главное."
         assert [b["text"] for row in screens[-1][1] for b in row] == [
-            "➕ Загрузить", "⬅️ Назад"
+            "➕ Загрузить", "← Назад"
         ]
         assert screens[-1][2].getpixel((10, 10)) != screens[-1][2].getpixel((40, 10))
         for as_file in (False, True):

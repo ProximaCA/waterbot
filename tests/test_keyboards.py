@@ -42,7 +42,7 @@ def test_tabs_mark_active_once():
 def test_templates_list_has_three_fixed_slots():
     empty = templates_list_kb([])
     assert [row[0]["text"] for row in empty] == [
-        "➕ Добавить шаблон 1", "➕ Добавить шаблон 2", "➕ Добавить шаблон 3", "⬅️ Назад"
+        "➕ Добавить шаблон 1", "➕ Добавить шаблон 2", "➕ Добавить шаблон 3", "← Назад"
     ]
     kb = templates_list_kb([_tpl(id=9, slot=3, is_default=True)])
     assert _payloads(kb) == [
@@ -61,7 +61,7 @@ def test_pickers_have_back_to_card_and_no_tabs():
     assert "tab:tpl" not in payloads
     assert any(p.endswith(":se") for p in payloads)
     assert [[b["text"] for b in row] for row in kb] == [
-        ["↖️", "⬆️", "↗️"], ["⬅️", "⏹️", "➡️"], ["↙️", "⬇️", "❎"], ["⬅️ Назад"]
+        ["↖️", "⬆️", "↗️"], ["⬅️", "⏹️", "➡️"], ["↙️", "⬇️", "❎"], ["← Назад"]
     ]
     w = _payloads(width_kb(9))
     assert w[-1] == "tpl:open:9"
@@ -84,9 +84,10 @@ def test_card_back_is_templates_root():
     assert payloads[-1] == "tab:tpl"
     assert "wm:pos:4" in payloads
     assert "tpl:del:4" in payloads
-    assert [[b["text"] for b in row] for row in template_card_kb(t)][3] == [
-        "Округлить", "Убрать фон"
-    ]
+    rows = [[b["text"] for b in row] for row in template_card_kb(t)]
+    assert rows[3] == ["Округлить", "Убрать фон"]
+    assert rows[4] == ["Удалить"]
+    assert "tpl:use:4" not in payloads
     assert "tpl:round:4" in payloads
     assert "tpl:bg:4" in payloads
 
@@ -126,14 +127,14 @@ def test_profile_kb_returns_to_main_menu():
     texts = [b["text"] for row in kb for b in row]
     payloads = _payloads(kb)
     assert payloads == ["nav:home"]
-    assert texts == ["⬅️ Назад"]
+    assert texts == ["← Назад"]
     assert all("оплат" not in t.lower() and "звезд" not in t.lower() for t in texts)
 
 
 def test_section_roots_return_to_menu_and_tail_card_to_list():
     for kb in (tails_list_kb([], False), channels_list_kb([])):
         assert _payloads(kb)[-1] == "nav:home"
-        assert kb[-1][0]["text"] == "⬅️ Назад"
+        assert kb[-1][0]["text"] == "← Назад"
         assert not any(p.startswith("tab:") for p in _payloads(kb))
     tail = Tail(id=2, user_id=1, name="tail", file_path="v.mp4")
     payloads = _payloads(tail_card_kb(tail))

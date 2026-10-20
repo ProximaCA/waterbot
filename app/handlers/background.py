@@ -13,7 +13,7 @@ from app.api import max_api
 from app.engine.apply import tmp_path, user_dir
 from app.engine.background import preview_image
 from app.engine import background as engine
-from app.keyboards.builders import btn
+from app.keyboards.builders import BTN_BACK, btn
 from app.models import User
 from app.renderers.views import PNG_FILE_NOTE, PROCESSING_IMAGE, Screen
 from app.schemas.updates import extract_media_items
@@ -53,7 +53,7 @@ def keyboard(result: Path | None) -> list:
     rows = [[btn("➕ Загрузить", "bg:upload")]]
     if result:
         rows.append([btn("📥 Скачать изображение", f"bg:download:{result.stem}")])
-    rows.append([btn("⬅️ Назад", "nav:home")])
+    rows.append([btn(BTN_BACK, "nav:home")])
     return rows
 
 
@@ -76,7 +76,7 @@ async def show(pool, user: User, ui: Screen) -> str | None:
 async def upload(pool, user: User, ui: Screen, args) -> None:
     set_wait(user.max_user_id, WAIT_BG_IMAGE)
     mid = await ui.show("ℹ️ Загрузите изображения формата PNG.\n\n" + PNG_FILE_NOTE,
-                        [[btn("⬅️ Назад", "bg:menu")]])
+                        [[btn(BTN_BACK, "bg:menu")]])
     _inputs[user.max_user_id] = mid
 
 
@@ -112,7 +112,7 @@ async def ingest_images(pool, user: User, update: dict) -> None:
             except Exception as exc:
                 print("background removal failed:", type(exc).__name__)
                 mid = await ui.show("Не получилось обработать изображение. Попробуйте ещё раз.",
-                                    [[btn("⬅️ Назад", "bg:menu")]])
+                                    [[btn(BTN_BACK, "bg:menu")]])
                 ui = Screen.for_user(user, mid)
                 continue
             succeeded = True

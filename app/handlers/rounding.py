@@ -13,7 +13,7 @@ from PIL import Image, UnidentifiedImageError
 from app.api import max_api
 from app.engine.apply import tmp_path, user_dir
 from app.engine.rounding import DEFAULT_SIZE, parse_size, preview_image, round_image
-from app.keyboards.builders import btn
+from app.keyboards.builders import BTN_BACK, btn
 from app.models import User
 from app.renderers.views import PNG_FILE_NOTE, PROCESSING_IMAGE, Screen
 from app.schemas.updates import extract_media_items, extract_text
@@ -72,12 +72,12 @@ def keyboard(result: Path | None) -> list:
     rows = [[btn("Стандартный", "round:standard")], [btn("Свой размер", "round:custom")]]
     if result:
         rows.append([btn("📥 Скачать изображение", f"round:download:{result.stem}")])
-    rows.append([btn("⬅️ Назад", "nav:home")])
+    rows.append([btn(BTN_BACK, "nav:home")])
     return rows
 
 
 def _back() -> list:
-    return [[btn("⬅️ Назад", "round:menu")]]
+    return [[btn(BTN_BACK, "round:menu")]]
 
 
 async def show(pool, user: User, ui: Screen) -> str | None:

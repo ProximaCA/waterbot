@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import List, Optional
 
 import asyncpg
-from PIL import Image
 
 from app import state
 from app.api.max_api import delete_message, get_chat, mid_from_send, send_file, send_message
@@ -15,7 +14,7 @@ from app.database.repos import jobs as jobs_repo
 from app.database.repos import tails as tails_repo
 from app.database.repos import templates as tpl_repo
 from app.engine.apply import tmp_path
-from app.engine.image import apply_watermark, contact_sheet, pad_chart, save_jpeg
+from app.engine.image import apply_watermark, checkerboard, contact_sheet, pad_chart, save_jpeg
 from app.keyboards.builders import (
     POSITION_LABELS,
     cancel_channel_wait_kb,
@@ -170,13 +169,21 @@ def _preview_path(t: Template) -> Optional[Path]:
         return None
     dest = tmp_path(t.user_id, "-card.jpg")
     try:
-        plate = Image.new("RGB", (720, 720), (30, 32, 38))
-        img = apply_watermark(plate, src, t.overlay())
+        img = apply_watermark(checkerboard(), src, t.overlay())
         save_jpeg(img, dest)
         return dest
     except Exception:
         dest.unlink(missing_ok=True)
         return src if src.suffix.lower() in {".jpg", ".jpeg", ".png"} else None
+
+
+async def _show_with_preview(t: Template, ui: Screen, text: str, kb) -> Optional[str]:
+    photo = _preview_path(t)
+    try:
+        return await ui.show(text, kb, photo)
+    finally:
+        if photo is not None and photo != Path(t.file_path):
+            photo.unlink(missing_ok=True)
 
 
 async def show_templates(pool: asyncpg.Pool, user: User, ui: Screen) -> Optional[str]:
@@ -201,12 +208,7 @@ async def show_templates(pool: asyncpg.Pool, user: User, ui: Screen) -> Optional
 async def show_template_card(
     pool: asyncpg.Pool, user: User, t: Template, ui: Screen
 ) -> Optional[str]:
-    photo = _preview_path(t)
-    try:
-        return await ui.show(template_card_body(t), template_card_kb(t), photo)
-    finally:
-        if photo is not None and photo != Path(t.file_path):
-            photo.unlink(missing_ok=True)
+    return await _show_with_preview(t, ui, template_card_body(t), template_card_kb(t))
 
 
 async def show_tails(pool: asyncpg.Pool, user: User, ui: Screen) -> Optional[str]:
@@ -275,24 +277,27 @@ async def ask_bind_channel(user: User, ui: Screen) -> Optional[str]:
 async def show_position_picker(
     pool: asyncpg.Pool, user: User, t: Template, ui: Screen
 ) -> Optional[str]:
-    photo = _preview_path(t)
-    try:
-        return await ui.show("Куда поставить водяной знак", position_kb(t.id, t.position), photo)
-    finally:
-        if photo is not None and photo != Path(t.file_path):
-            photo.unlink(missing_ok=True)
+    return await _show_with_preview(
+        t, ui, "Куда поставить водяной знак", position_kb(t.id, t.position)
+    )
 
 
-async def show_width_picker(ui: Screen, tid: int) -> Optional[str]:
-    return await ui.show("Ширина знака (% кадра)", width_kb(tid))
+async def show_width_picker(
+    pool: asyncpg.Pool, user: User, t: Template, ui: Screen
+) -> Optional[str]:
+    return await _show_with_preview(t, ui, "Ширина знака (% кадра)", width_kb(t.id))
 
 
-async def show_opacity_picker(ui: Screen, tid: int) -> Optional[str]:
-    return await ui.show("Прозрачность", opacity_kb(tid))
+async def show_opacity_picker(
+    pool: asyncpg.Pool, user: User, t: Template, ui: Screen
+) -> Optional[str]:
+    return await _show_with_preview(t, ui, "Прозрачность", opacity_kb(t.id))
 
 
-async def show_rotation_picker(ui: Screen, tid: int) -> Optional[str]:
-    return await ui.show("Поворот", rotation_kb(tid))
+async def show_rotation_picker(
+    pool: asyncpg.Pool, user: User, t: Template, ui: Screen
+) -> Optional[str]:
+    return await _show_with_preview(t, ui, "Поворот", rotation_kb(t.id))
 
 
 async def show_pad_picker(
@@ -313,9 +318,13 @@ async def show_pad_picker(
             photo.unlink(missing_ok=True)
 
 
-async def show_delete_tpl(ui: Screen, tid: int) -> Optional[str]:
-    return await ui.show("Удалить этот шаблон?", confirm_delete_tpl_kb(tid))
+async def show_delete_tpl(
+    pool: asyncpg.Pool, user: User, t: Template, ui: Screen
+) -> Optional[str]:
+    return await ui.show("Удалить этот шаблон?", confirm_delete_tpl_kb(t.id))
 
 
-async def show_delete_tail(ui: Screen, tid: int) -> Optional[str]:
-    return await ui.show("Удалить этот хвост?", confirm_delete_tail_kb(tid))
+async def show_delete_tail(
+    pool: asyncpg.Pool, user: User, t: Tail, ui: Screen
+) -> Optional[str]:
+    return await ui.show("Удалить этот хвост?", confirm_delete_tail_kb(t.id))

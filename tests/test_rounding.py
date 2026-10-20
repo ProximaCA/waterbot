@@ -76,7 +76,7 @@ async def test_standard_custom_preview_and_original_download():
         await rounding.show(None, USER, Screen.for_user(USER))
         assert screens[-1][0] == rounding.BODY
         assert [b["text"] for row in screens[-1][1] for b in row] == [
-            "Стандартный", "Свой размер", "⬅️ Назад"
+            "Стандартный", "Свой размер", "← Назад"
         ]
         assert screens[-1][2].getpixel((280, 320)) == (255, 255, 255)
         await rounding.standard(None, USER, Screen.for_user(USER), [])
@@ -144,7 +144,7 @@ async def test_result_disappears_from_menu_and_download_after_ten_minutes():
         assert rounding._latest(USER) is None
         assert not result.exists()
         assert [button["text"] for row in show.await_args.args[1] for button in row] == [
-            "Стандартный", "Свой размер", "⬅️ Назад"
+            "Стандартный", "Свой размер", "← Назад"
         ]
         await rounding.download(None, USER, Screen.for_user(USER), [result.stem])
         send.assert_not_awaited()

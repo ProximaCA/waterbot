@@ -6,6 +6,8 @@ from statistics import median
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageOps
 
+from app.engine.image import checkerboard
+
 
 def remove_background(data: bytes) -> Image.Image:
     with Image.open(io.BytesIO(data)) as source:
@@ -36,12 +38,7 @@ def remove_background(data: bytes) -> Image.Image:
 
 
 def preview_image(result: Image.Image | None = None) -> Image.Image:
-    preview = Image.new("RGB", (560, 560), "white")
-    draw = ImageDraw.Draw(preview)
-    for y in range(0, 560, 28):
-        for x in range(0, 560, 28):
-            if (x // 28 + y // 28) % 2 == 0:
-                draw.rectangle((x, y, x + 27, y + 27), fill=(100, 100, 100))
+    preview = checkerboard(560)
     if result is not None:
         image = ImageOps.contain(result.convert("RGBA"), preview.size,
                                  Image.Resampling.LANCZOS)

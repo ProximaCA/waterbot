@@ -71,7 +71,7 @@ async def test_position_replaces_photo_and_keeps_controls(tmp_path):
     assert update.await_count == 1
     assert update.await_args.args[1:] == (9, USER.id)
     assert update.await_args.kwargs == {"position": "nw"}
-    assert photos[0].getpixel((10, 10))[0] < 50
+    assert photos[0].getpixel((10, 10))[0] < 150
     assert photos[1].getpixel((10, 10))[0] > 200
     assert not (tmp_path / "preview.jpg").exists()
 
@@ -241,7 +241,8 @@ async def _edit_mark(tmp_path, path, payload):
     screens = []
 
     async def show(self, text, kb, photo=None):
-        screens.append((text, [b["text"] for row in kb for b in row], photo))
+        copied = Image.open(photo).copy() if photo else None
+        screens.append((text, [b["text"] for row in kb for b in row], copied))
         return f"m{len(screens)}"
 
     async def update(pool, tid, user_id, **fields):
@@ -348,3 +349,38 @@ async def test_card_remove_bg_keeps_subject_and_png_path(tmp_path):
         assert result.mode == "RGBA"
         assert result.getpixel((0, 0))[3] == 0
         assert result.getpixel((40, 20)) == (0, 0, 255, 255)
+    preview = screens[-1][2]
+    assert preview.getpixel((10, 10))[:3] in {(255, 255, 255), (100, 100, 100)}
+
+
+@pytest.mark.parametrize("open_p,set_p,title,field,value", [
+    ("wm:w:9", "wm:setw:9:50", "Ширина знака (% кадра)", "width_pct", 50),
+    ("wm:op:9", "wm:setop:9:40", "Прозрачность", "opacity", 40),
+    ("wm:rot:9", "wm:setrot:9:90", "Поворот", "rotation_deg", 90),
+])
+async def test_overlay_picker_shows_preview_and_stays(tmp_path, open_p, set_p, title, field, value):
+    path = tmp_path / "mark.png"
+    Image.new("RGBA", (80, 40), "red").save(path)
+    tpl = Template(id=9, user_id=USER.id, name="mark", file_path=str(path))
+    photos = []
+
+    async def send(path, **kwargs):
+        photos.append((kwargs.get("caption"), Image.open(path).copy()))
+        return {"message": {"body": {"mid": f"p{len(photos)}"}}}
+
+    with (
+        patch.object(callbacks.tpl_repo, "get", AsyncMock(side_effect=[
+            tpl, replace(tpl, **{field: value})
+        ])),
+        patch.object(callbacks.tpl_repo, "update", AsyncMock(
+            return_value=replace(tpl, **{field: value}))) as update,
+        patch.object(views, "delete_message", AsyncMock(return_value=True)),
+        patch.object(views, "send_file", send),
+        patch.object(views, "tmp_path", return_value=tmp_path / "preview.jpg"),
+    ):
+        await click(open_p)
+        await click(set_p)
+    assert [p[0] for p in photos] == [title, title]
+    assert photos[0][1].size == photos[1][1].size == (720, 720)
+    assert update.await_args.kwargs == {field: value}
+    assert not (tmp_path / "preview.jpg").exists()
