@@ -44,6 +44,10 @@ def _directory(user: User) -> Path:
     return path
 
 
+def _source(result: Path) -> Path:
+    return result.with_name(result.stem + ".source")
+
+
 def _result(user: User, key: str) -> Path | None:
     if not re.fullmatch(r"[0-9a-f]{32}", key):
         return None
@@ -54,6 +58,7 @@ def _result(user: User, key: str) -> Path | None:
         return None
     if time.time() - modified >= RESULT_TTL:
         path.unlink(missing_ok=True)
+        _source(path).unlink(missing_ok=True)
         return None
     return path
 
@@ -72,6 +77,8 @@ def keyboard(result: Path | None) -> list:
     rows = [[btn("Стандартный", "round:standard")], [btn("Свой размер", "round:custom")]]
     if result:
         rows.append([btn("📥 Скачать изображение", f"round:download:{result.stem}")])
+        if _source(result).is_file():
+            rows.append([btn("Сброс", "round:reset")])
     rows.append([btn(BTN_BACK, "nav:home")])
     return rows
 
@@ -127,6 +134,7 @@ def _save(user: User, data: bytes, size: int) -> Path:
     result = round_image(data, size)
     dest = _directory(user) / f"{uuid.uuid4().hex}.png"
     result.save(dest, "PNG")
+    _source(dest).write_bytes(data)
     index = dest.with_suffix(".latest")
     index.write_text(dest.stem)
     index.replace(dest.parent / "latest")
@@ -178,3 +186,15 @@ async def download(pool, user: User, ui: Screen, args) -> None:
     else:
         clear_wait(user.max_user_id)
         await show(pool, user, ui)
+
+
+async def reset(pool, user: User, ui: Screen, args) -> None:
+    result = _latest(user)
+    bak = _source(result) if result else None
+    if result and bak is not None and bak.is_file():
+        try:
+            with Image.open(bak) as image:
+                image.convert("RGBA").save(result, "PNG")
+        except (OSError, UnidentifiedImageError, Image.DecompressionBombError):
+            pass
+    await show(pool, user, ui)

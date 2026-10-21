@@ -5,8 +5,11 @@ from app.keyboards.builders import (
     channel_card_kb,
     channels_list_kb,
     confirm_delete_tpl_kb,
+    opacity_kb,
+    pad_kb,
     position_kb,
     profile_kb,
+    rotation_kb,
     tabs_kb,
     tail_card_kb,
     tails_list_kb,
@@ -61,11 +64,16 @@ def test_pickers_have_back_to_card_and_no_tabs():
     assert "tab:tpl" not in payloads
     assert any(p.endswith(":se") for p in payloads)
     assert [[b["text"] for b in row] for row in kb] == [
-        ["↖️", "⬆️", "↗️"], ["⬅️", "⏹️", "➡️"], ["↙️", "⬇️", "❎"], ["← Назад"]
+        ["↖️", "⬆️", "↗️"], ["⬅️", "⏹️", "➡️"], ["↙️", "⬇️", "❎"],
+        ["Сброс"], ["← Назад"]
     ]
-    w = _payloads(width_kb(9))
+    w = _payloads(width_kb(9, 30))
     assert w[-1] == "tpl:open:9"
     assert "tab:ch" not in w
+    assert "wm:setw:9:30" in w
+    texts = [b["text"] for row in width_kb(9, 30) for b in row]
+    assert "✅ 30%" in texts
+    assert "Сброс" in texts
 
 
 @pytest.mark.parametrize("position", [code for _, code in POSITIONS_GRID])
@@ -86,10 +94,12 @@ def test_card_back_is_templates_root():
     assert "tpl:del:4" in payloads
     rows = [[b["text"] for b in row] for row in template_card_kb(t)]
     assert rows[3] == ["Округлить", "Убрать фон"]
-    assert rows[4] == ["Удалить"]
+    assert rows[4] == ["Сброс"]
+    assert rows[5] == ["Удалить"]
     assert "tpl:use:4" not in payloads
     assert "tpl:round:4" in payloads
     assert "tpl:bg:4" in payloads
+    assert "tpl:reset:4" in payloads
 
 
 def test_channel_card_back_to_list():
@@ -146,3 +156,15 @@ def test_confirm_delete_has_no_tabs():
     payloads = _payloads(confirm_delete_tpl_kb(3))
     assert payloads == ["tpl:delok:3", "tpl:open:3"]
     assert "tab:tpl" not in payloads
+
+
+def test_pad_arrows_reset_to_center_and_stay_on_axis():
+    x = pad_kb(9, "x", 0)
+    assert [[b["text"] for b in row] for row in x] == [["⬅️", "Сброс", "➡️"], ["← Назад"]]
+    assert _payloads(x) == ["wm:setpx:9:-10", "wm:setpx:9:0", "wm:setpx:9:10", "tpl:open:9"]
+    y = pad_kb(9, "y", 20)
+    assert y[0][0]["text"] == "⬆️"
+    assert y[0][2]["text"] == "⬇️"
+    assert _payloads(y)[:3] == ["wm:setpy:9:10", "wm:setpy:9:0", "wm:setpy:9:20"]
+    assert "✅ 100%" in [b["text"] for row in opacity_kb(9, 100) for b in row]
+    assert "✅ 0°" in [b["text"] for row in rotation_kb(9, 0) for b in row]

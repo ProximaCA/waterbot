@@ -81,12 +81,13 @@ def _pos_label(code: str) -> str:
 def templates_body(n: int) -> str:
     if n == 0:
         return "🖼 **Шаблоны**\n\nДобавьте новый шаблон"
-    return "**Шаблоны**\n\nВыберите активные шаблон:"
+    return "🖼 **Шаблоны**\n\nВыберите активные шаблон:"
 
 
 def template_card_body(t: Template) -> str:
+    title = f"{t.name} (активно)" if t.is_default else t.name
     return (
-        f"**{t.name}**\n"
+        f"**{title}**\n"
         f"Расположение: {_pos_label(t.position)}\n"
         f"Ширина: {t.width_pct}%\n"
         f"Прозрачность: {t.opacity}%\n"
@@ -97,7 +98,7 @@ def template_card_body(t: Template) -> str:
 
 def tails_body(n: int, enabled: bool) -> str:
     lines = [
-        "**Хвосты**",
+        "〽️ **Хвосты**",
         "",
         "Видеохвостик — короткий ролик, добавляемый в начале или в конце основного видео.",
     ]
@@ -116,12 +117,12 @@ def tail_card_body(t: Tail) -> str:
 def channels_body(n: int) -> str:
     if n == 0:
         return (
-            "**Каналы**\n\n"
+            "🤖 **Каналы**\n\n"
             "Всего: 0\n\n"
             "Добавьте бота админом канала, затем нажмите «+ Канал» "
             "и перешлите любой пост из этого канала."
         )
-    return f"**Каналы**\n\nВсего: {n}\n\nНажмите канал, чтобы открыть настройки."
+    return f"🤖 **Каналы**\n\nВсего: {n}\n\nНажмите канал, чтобы открыть настройки."
 
 
 def channel_card_body(c: Channel, template: Optional[Template], link: str = "") -> str:
@@ -153,7 +154,7 @@ def profile_body(user: User, stats: DayStats) -> str:
     else:
         traffic = f"{n / (1024 * 1024):.2f} МБ"
     return (
-        f"**Профиль**\n\n"
+        f"👤 **Профиль**\n\n"
         f"{user.name or '—'}\n"
         f"ID: {user.max_user_id}\n\n"
         f"Тариф: демо\n\n"
@@ -285,19 +286,23 @@ async def show_position_picker(
 async def show_width_picker(
     pool: asyncpg.Pool, user: User, t: Template, ui: Screen
 ) -> Optional[str]:
-    return await _show_with_preview(t, ui, "Ширина знака (% кадра)", width_kb(t.id))
+    return await _show_with_preview(
+        t, ui, "Ширина знака (% кадра)", width_kb(t.id, t.width_pct)
+    )
 
 
 async def show_opacity_picker(
     pool: asyncpg.Pool, user: User, t: Template, ui: Screen
 ) -> Optional[str]:
-    return await _show_with_preview(t, ui, "Прозрачность", opacity_kb(t.id))
+    return await _show_with_preview(t, ui, "Прозрачность", opacity_kb(t.id, t.opacity))
 
 
 async def show_rotation_picker(
     pool: asyncpg.Pool, user: User, t: Template, ui: Screen
 ) -> Optional[str]:
-    return await _show_with_preview(t, ui, "Поворот", rotation_kb(t.id))
+    return await _show_with_preview(
+        t, ui, "Поворот", rotation_kb(t.id, t.rotation_deg)
+    )
 
 
 async def show_pad_picker(
@@ -312,7 +317,8 @@ async def show_pad_picker(
     except Exception:
         dest.unlink(missing_ok=True)
     try:
-        return await ui.show(title, pad_kb(t.id, axis), photo)
+        current = t.pad_x if axis == "x" else t.pad_y
+        return await ui.show(title, pad_kb(t.id, axis, current), photo)
     finally:
         if photo is not None:
             photo.unlink(missing_ok=True)

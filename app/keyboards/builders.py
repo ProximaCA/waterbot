@@ -3,9 +3,12 @@ from __future__ import annotations
 
 from typing import Iterable, List, Sequence
 
-from app.models import Channel, Tail, Template
+from app.models import Channel, Overlay, Tail, Template
 
 BTN_BACK = "← Назад"
+_DEFAULT = Overlay()
+_PAD_STEP = 10
+_PAD_LIMIT = 20
 
 
 def btn(text: str, payload: str) -> dict:
@@ -42,7 +45,6 @@ POSITION_LABELS = {
 WIDTHS = (5, 10, 15, 20, 25, 30, 40, 50, 60, 75, 100)
 OPACITIES = (20, 40, 60, 80, 100)
 ROTATIONS = (0, 90, 180, 270, -15, 15)
-PADS = (-20, -10, 0, 10, 20)
 
 
 def tabs_kb(active: str) -> List[List[dict]]:
@@ -89,6 +91,7 @@ def template_card_kb(t: Template) -> List[List[dict]]:
         [btn("Прозрачность", f"wm:op:{tid}"), btn("Поворот", f"wm:rot:{tid}")],
         [btn("Сдвиг по X", f"wm:px:{tid}"), btn("Сдвиг по Y", f"wm:py:{tid}")],
         [btn("Округлить", f"tpl:round:{tid}"), btn("Убрать фон", f"tpl:bg:{tid}")],
+        [btn("Сброс", f"tpl:reset:{tid}")],
         [btn("Удалить", f"tpl:del:{tid}")],
         [btn(BTN_BACK, "tab:tpl")],
     ]
@@ -109,6 +112,7 @@ def position_kb(tid: int, position: str) -> List[List[dict]]:
             btn("❎" if code == position else label, f"wm:setpos:{tid}:{code}")
             for label, code in chunk
         ])
+    rows.append([btn("Сброс", f"wm:setpos:{tid}:{_DEFAULT.position}")])
     rows.append([btn(BTN_BACK, f"tpl:open:{tid}")])
     return rows
 
@@ -121,33 +125,47 @@ def _chunk_btns(items: Iterable[tuple[str, str]], per_row: int) -> List[List[dic
     return rows
 
 
-def width_kb(tid: int) -> List[List[dict]]:
-    items = [(f"{n}%", f"wm:setw:{tid}:{n}") for n in WIDTHS]
+def _picked(label: str, current, value) -> str:
+    return f"✅ {label}" if current == value else label
+
+
+def width_kb(tid: int, current: int) -> List[List[dict]]:
+    items = [(_picked(f"{n}%", current, n), f"wm:setw:{tid}:{n}") for n in WIDTHS]
     rows = _chunk_btns(items, 4)
+    rows.append([btn("Сброс", f"wm:setw:{tid}:{_DEFAULT.width_pct}")])
     rows.append([btn(BTN_BACK, f"tpl:open:{tid}")])
     return rows
 
 
-def opacity_kb(tid: int) -> List[List[dict]]:
-    items = [(f"{n}%", f"wm:setop:{tid}:{n}") for n in OPACITIES]
+def opacity_kb(tid: int, current: int) -> List[List[dict]]:
+    items = [(_picked(f"{n}%", current, n), f"wm:setop:{tid}:{n}") for n in OPACITIES]
     rows = _chunk_btns(items, 5)
+    rows.append([btn("Сброс", f"wm:setop:{tid}:{_DEFAULT.opacity}")])
     rows.append([btn(BTN_BACK, f"tpl:open:{tid}")])
     return rows
 
 
-def rotation_kb(tid: int) -> List[List[dict]]:
-    items = [(f"{n}°", f"wm:setrot:{tid}:{n}") for n in ROTATIONS]
+def rotation_kb(tid: int, current: int) -> List[List[dict]]:
+    items = [(_picked(f"{n}°", current, n), f"wm:setrot:{tid}:{n}") for n in ROTATIONS]
     rows = _chunk_btns(items, 3)
+    rows.append([btn("Сброс", f"wm:setrot:{tid}:{_DEFAULT.rotation_deg}")])
     rows.append([btn(BTN_BACK, f"tpl:open:{tid}")])
     return rows
 
 
-def pad_kb(tid: int, axis: str) -> List[List[dict]]:
+def pad_kb(tid: int, axis: str, current: int) -> List[List[dict]]:
     verb = "setpx" if axis == "x" else "setpy"
-    items = [(f"{n}%", f"wm:{verb}:{tid}:{n}") for n in PADS]
-    rows = _chunk_btns(items, 5)
-    rows.append([btn(BTN_BACK, f"tpl:open:{tid}")])
-    return rows
+    lo = max(-_PAD_LIMIT, current - _PAD_STEP)
+    hi = min(_PAD_LIMIT, current + _PAD_STEP)
+    left, right = ("⬅️", "➡️") if axis == "x" else ("⬆️", "⬇️")
+    return [
+        [
+            btn(left, f"wm:{verb}:{tid}:{lo}"),
+            btn("Сброс", f"wm:{verb}:{tid}:0"),
+            btn(right, f"wm:{verb}:{tid}:{hi}"),
+        ],
+        [btn(BTN_BACK, f"tpl:open:{tid}")],
+    ]
 
 
 def cancel_wait_kb() -> List[List[dict]]:

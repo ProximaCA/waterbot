@@ -218,6 +218,16 @@ def _circle_mark(data: bytes) -> Image.Image:
     return round_image(data, max(1, min(size, MAX_SIZE)))
 
 
+def _source_files(item) -> list[Path]:
+    return sorted(Path(item.file_path).parent.glob(f"{item.id}.source.*"))
+
+
+def _keep_source(item) -> None:
+    src = Path(item.file_path)
+    if src.is_file() and not _source_files(item):
+        (src.parent / f"{item.id}.source{src.suffix}").write_bytes(src.read_bytes())
+
+
 async def _transform_template(pool, user, ui, args, transform) -> None:
     tid = _tid(args)
     item = await tpl_repo.get(pool, tid, user.id) if tid else None
@@ -230,6 +240,7 @@ async def _transform_template(pool, user, ui, args, transform) -> None:
     dest = src.with_suffix(".png")
     tmp = dest.with_name(dest.name + ".tmp")
     try:
+        _keep_source(item)
         result = await asyncio.to_thread(transform, src.read_bytes())
         await asyncio.to_thread(result.save, tmp, "PNG")
         tmp.replace(dest)
@@ -251,6 +262,25 @@ async def _bg_template(pool, user, ui, args) -> None:
     await _transform_template(pool, user, ui, args, remove_background)
 
 
+async def _reset_template(pool, user, ui, args) -> None:
+    tid = _tid(args)
+    item = await tpl_repo.get(pool, tid, user.id) if tid else None
+    if not item:
+        await views.show_templates(pool, user, ui)
+        return
+    src = Path(item.file_path)
+    bak = next(iter(_source_files(item)), None)
+    if bak is not None:
+        dest = src.with_suffix(bak.suffix)
+        dest.write_bytes(bak.read_bytes())
+        if dest.resolve() != src.resolve():
+            src.unlink(missing_ok=True)
+            item = await tpl_repo.update(
+                pool, item.id, user.id, file_path=str(dest)
+            ) or replace(item, file_path=str(dest))
+    await views.show_template_card(pool, user, item, ui)
+
+
 ROUTES: dict[str, Handler] = {
     "nav:home": _tab(views.show_menu),
     "tab:tpl": _tab(views.show_templates),
@@ -261,10 +291,12 @@ ROUTES: dict[str, Handler] = {
     "round:standard": rounding.standard,
     "round:custom": rounding.custom,
     "round:download": rounding.download,
+    "round:reset": rounding.reset,
     "bg:noop": _tab(background.show),
     "bg:menu": _tab(background.show),
     "bg:upload": background.upload,
     "bg:download": background.download,
+    "bg:reset": background.reset,
     "tpl:new": _new_template,
     "tpl:back": _templates_back,
     "tpl:select": _select_template,
@@ -279,6 +311,7 @@ ROUTES: dict[str, Handler] = {
     "tpl:delok": _delok(tpl_repo.delete, views.show_templates),
     "tpl:round": _round_template,
     "tpl:bg": _bg_template,
+    "tpl:reset": _reset_template,
     "wm:pos": _open(tpl_repo, views.show_position_picker, views.show_templates),
     "wm:w": _open(tpl_repo, views.show_width_picker, views.show_templates),
     "wm:op": _open(tpl_repo, views.show_opacity_picker, views.show_templates),

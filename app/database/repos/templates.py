@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Optional
 
 import asyncpg
@@ -113,4 +114,9 @@ async def delete(pool: asyncpg.Pool, template_id: int, user_id: int) -> Optional
     async with pool.acquire() as conn:
         async with conn.transaction():
             row = await owned.delete_owned(conn, "templates", user_id, template_id)
-            return str(row["file_path"]) if row else None
+            if not row:
+                return None
+            path = Path(row["file_path"])
+            for bak in path.parent.glob(f"{template_id}.source.*"):
+                bak.unlink(missing_ok=True)
+            return str(path)

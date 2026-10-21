@@ -7,7 +7,7 @@ import uuid
 from collections import defaultdict
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 
 from app.api import max_api
 from app.engine.apply import tmp_path, user_dir
@@ -32,6 +32,10 @@ def _directory(user: User) -> Path:
     return path
 
 
+def _source(result: Path) -> Path:
+    return result.with_name(result.stem + ".source")
+
+
 def _result(user: User, key: str) -> Path | None:
     if not re.fullmatch(r"[0-9a-f]{32}", key):
         return None
@@ -53,6 +57,8 @@ def keyboard(result: Path | None) -> list:
     rows = [[btn("➕ Загрузить", "bg:upload")]]
     if result:
         rows.append([btn("📥 Скачать изображение", f"bg:download:{result.stem}")])
+        if _source(result).is_file():
+            rows.append([btn("Сброс", "bg:reset")])
     rows.append([btn(BTN_BACK, "nav:home")])
     return rows
 
@@ -84,6 +90,7 @@ def _save(user: User, data: bytes) -> Path:
     result = engine.remove_background(data)
     dest = _directory(user) / f"{uuid.uuid4().hex}.png"
     result.save(dest, "PNG")
+    _source(dest).write_bytes(data)
     index = dest.with_suffix(".latest")
     index.write_text(dest.stem)
     index.replace(dest.parent / "latest")
@@ -134,3 +141,15 @@ async def download(pool, user: User, ui: Screen, args) -> None:
     else:
         clear_wait(user.max_user_id)
         await show(pool, user, ui)
+
+
+async def reset(pool, user: User, ui: Screen, args) -> None:
+    result = _latest(user)
+    bak = _source(result) if result else None
+    if result and bak is not None and bak.is_file():
+        try:
+            with Image.open(bak) as image:
+                image.convert("RGBA").save(result, "PNG")
+        except (OSError, UnidentifiedImageError, Image.DecompressionBombError):
+            pass
+    await show(pool, user, ui)

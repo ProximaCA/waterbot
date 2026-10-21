@@ -88,7 +88,9 @@ async def test_standard_custom_preview_and_original_download():
         with Image.open(first) as png:
             assert png.format == "PNG" and png.size == (1254, 1254)
             assert png.getpixel((0, 0))[3] == 0
-        assert screens[-1][1][-2][0]["text"] == "📥 Скачать изображение"
+        texts = [b["text"] for row in screens[-1][1] for b in row]
+        assert "📥 Скачать изображение" in texts and "Сброс" in texts
+        assert screens[-1][1][-2][0]["payload"] == "round:reset"
         assert get_wait(USER.max_user_id) is None
 
         await rounding.custom(None, USER, Screen.for_user(USER), [])
@@ -109,7 +111,8 @@ async def test_standard_custom_preview_and_original_download():
         await rounding.download(None, USER, Screen.for_user(USER), [first.stem])
         send.assert_awaited_once_with(str(first), kind="file", user_id=USER.max_user_id)
         await rounding.show(None, USER, Screen.for_user(USER))
-        assert screens[-1][1][-2][0]["payload"] == f"round:download:{second.stem}"
+        assert screens[-1][1][-3][0]["payload"] == f"round:download:{second.stem}"
+        assert screens[-1][1][-2][0]["payload"] == "round:reset"
 
 
 async def test_failed_upload_retries_and_download_is_user_scoped():
@@ -148,6 +151,28 @@ async def test_result_disappears_from_menu_and_download_after_ten_minutes():
         ]
         await rounding.download(None, USER, Screen.for_user(USER), [result.stem])
         send.assert_not_awaited()
+
+
+async def test_reset_restores_original_upload():
+    original = image_bytes("JPEG")
+    result = rounding._save(USER, original, 300)
+    with Image.open(result) as rounded:
+        assert rounded.size == (300, 300)
+        assert rounded.getpixel((0, 0))[3] == 0
+    screens = []
+
+    async def show(self, text, kb, photo=None):
+        screens.append((text, [b["text"] for row in kb for b in row],
+                        Image.open(photo).copy() if photo else None))
+        return "menu"
+
+    with patch.object(Screen, "show", show):
+        await rounding.reset(None, USER, Screen.for_user(USER), [])
+    restored = rounding._latest(USER)
+    with Image.open(restored) as image:
+        assert image.size == (200, 100)
+        assert image.getpixel((0, 0))[0] > 250
+    assert "Сброс" in screens[-1][1]
 
 
 async def test_rounding_routes_input_cancel_and_start_do_not_apply_watermark():

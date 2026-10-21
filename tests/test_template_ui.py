@@ -38,7 +38,7 @@ async def click(payload, mid="old"):
 
 def test_template_prompts_match_spec():
     assert views.templates_body(0) == "🖼 **Шаблоны**\n\nДобавьте новый шаблон"
-    assert views.templates_body(1) == "**Шаблоны**\n\nВыберите активные шаблон:"
+    assert views.templates_body(1) == "🖼 **Шаблоны**\n\nВыберите активные шаблон:"
 
 
 async def test_position_replaces_photo_and_keeps_controls(tmp_path):
@@ -333,6 +333,29 @@ async def test_tail_card_sends_video_and_falls_back_to_text(tmp_path):
     assert sent[0][0] == "file" and sent[0][1] == str(clip) and sent[0][2] == "video"
     assert sent[0][3] == views.tail_card_body(tail)
     assert sent[1][0] == "text" and sent[1][1] == views.tail_card_body(missing)
+
+
+def test_card_title_marks_active_template():
+    t = Template(id=9, user_id=USER.id, name="Шаблон 1", file_path="p.png")
+    assert views.template_card_body(t).startswith("**Шаблон 1**\n")
+    assert views.template_card_body(replace(t, is_default=True)).startswith(
+        "**Шаблон 1 (активно)**\n"
+    )
+
+
+async def test_card_reset_restores_original_mark(tmp_path):
+    path = tmp_path / "mark.jpg"
+    Image.new("RGB", (80, 40), "red").save(path, "JPEG")
+    tpl, screens, save = await _edit_mark(tmp_path, path, "tpl:round:9")
+    rounded = Path(tpl.file_path)
+    assert rounded.suffix == ".png" and (tmp_path / "9.source.jpg").is_file()
+    tpl, screens, save = await _edit_mark(tmp_path, rounded, "tpl:reset:9")
+    restored = Path(tpl.file_path)
+    assert restored.suffix == ".jpg"
+    with Image.open(restored) as image:
+        assert image.size == (80, 40)
+        assert image.getpixel((0, 0))[0] > 250
+    assert "Сброс" in screens[-1][1]
 
 
 async def test_card_remove_bg_keeps_subject_and_png_path(tmp_path):

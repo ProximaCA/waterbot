@@ -78,6 +78,28 @@ async def test_menu_upload_download_and_next_photo_uses_active_template(monkeypa
         assert screens[-1][0] == "Главное меню"
 
 
+async def test_reset_restores_original_upload():
+    blob = io.BytesIO()
+    Image.new("RGB", (80, 40), "red").save(blob, "JPEG")
+    result = background._save(USER, blob.getvalue())
+    with Image.open(result) as removed:
+        assert removed.mode == "RGBA"
+        assert removed.getpixel((0, 0))[3] == 0
+    screens = []
+
+    async def show(self, text, kb, photo=None):
+        screens.append([b["text"] for row in kb for b in row])
+        return "menu"
+
+    with patch.object(Screen, "show", show):
+        await background.reset(None, USER, Screen.for_user(USER), [])
+    restored = background._latest(USER)
+    with Image.open(restored) as image:
+        assert image.size == (80, 40)
+        assert image.getpixel((0, 0))[0] > 250 and image.getpixel((0, 0))[3] == 255
+    assert "Сброс" in screens[-1]
+
+
 async def test_bad_image_retries_and_other_users_cannot_download(monkeypatch):
     def invalid(data):
         raise ValueError("bad image")
